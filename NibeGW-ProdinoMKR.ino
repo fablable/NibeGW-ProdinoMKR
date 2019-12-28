@@ -20,14 +20,23 @@
  *  27.6.2014   v1.02   Fixed compile error and added Ethernet initialization delay.
  *  29.6.2015   v2.00   Bidirectional support.
  *  18.2.2017   v3.00   Redesigned.
+ *
+ *                      Code taken from https://github.com/openhab/openhab2-addons/..
+ *                      bundles/org.openhab.binding.nibeheatpump/contrib/NibeGW/Arduino/NibeGW
+ *                      for https://github.com/fablable/NibeGW-ProdinoMKR by fablable@uamm.de
+ *
+ *  28.12.2019  v3.50   added support for Prodino MKR Zero Ethernet, modified Ethernet handling
+ *                      to prevent Nibe from entering error state if network connection fails
  */
 
 // ######### CONFIGURATION #######################
 
-#define VERSION                 "3.00"
+#define VERSION                 "3.50"
 
 // Enable if you use ProDiNo board
 //#define PRODINO_BOARD
+// Enable if you use Prodino MKR Zero
+#define PRODINO_MKR0
 // Enable if ENC28J60 LAN module is used
 //#define TRANSPORT_ETH_ENC28J60
 
@@ -35,7 +44,11 @@
 //#define ENABLE_DEBUG
 #define VERBOSE_LEVEL           3
 
+#ifdef PRODINO_MKR0
+#define BOARD_NAME              "NibeGW running on KMP Prodino MKR Zero"
+#else
 #define BOARD_NAME              "Arduino NibeGW"
+#endif
 #define BOARD_MAC               { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED }
 #define BOARD_IP                { 192, 168, 1, 50 }
 #define GATEWAY_IP              { 192, 168, 1, 1 }
@@ -51,7 +64,7 @@
 #define ETH_INIT_DELAY          10
 
 // Used serial port and direction change pin for RS-485 port
-#ifdef PRODINO_BOARD
+#if defined PRODINO_BOARD || defined PRODINO_MKR0
 #define RS485_PORT              Serial1
 #define RS485_DIRECTION_PIN     3
 #else
@@ -79,9 +92,18 @@
 #ifdef PRODINO_BOARD
 #include "KmpDinoEthernet.h"
 #include "KMPCommon.h"
+#elif defined PRODINO_MKR0
+#include "KMPProDinoMKRZero.h"
+#include "KMPCommon.h"
 #endif
 
+#ifdef PRODINO_MKR0
+// ### todo: Watchdog
+// possible candidate:
+// https://github.com/javos65/WDTZero
+#else
 #include <avr/wdt.h>
+#endif
 
 #include "NibeGw.h"
 
@@ -129,15 +151,15 @@ char debugBuf[DEBUG_BUFFER_SIZE];
 
 void debugPrint(char* data)
 {
+#if defined PRODINO_BOARD || defined PRODINO_MKR0
+  Serial.print(data);
+#else
   if (ethernetInitialized)
   {
     udp.beginPacket(targetIp, TARGER_DEBUG_PORT);
     udp.write(data);
     udp.endPacket();
   }
-
-#ifdef PRODINO_BOARD
-  Serial.print(data);
 #endif
 }
 #endif
@@ -147,7 +169,11 @@ void debugPrint(char* data)
 void setup()
 {
   // Start watchdog
+#ifdef PRODINO_MKR0
+  // ### todo: Watchdog
+#else
   wdt_enable (WDTO_2S);
+#endif
 
   nibegw.setCallback(nibeCallbackMsgReceived, nibeCallbackTokenReceived);
   nibegw.setAckModbus40Address(ACK_MODBUS40);
@@ -163,6 +189,9 @@ void setup()
 #ifdef PRODINO_BOARD
   DinoInit();
   Serial.begin(115200, SERIAL_8N1);
+#elif defined PRODINO_MKR0
+  while(!Serial) ;
+  KMPProDinoMKRZero.init(ProDino_MKR_Zero_Ethernet);
 #endif
 
   DEBUG_PRINTDATA(0, "%s ", BOARD_NAME);
@@ -174,7 +203,11 @@ void setup()
 
 void loop()
 {
+#ifdef PRODINO_MKR0
+  // ### todo: Watchdog
+#else
   wdt_reset();
+#endif
 
   long now = millis() / 1000;
 
@@ -226,9 +259,14 @@ void loop()
 void initializeEthernet()
 {
   Ethernet.begin(mac, ip, gw, mask);
-  ethernetInitialized = true;
-  udp4readCmnds.begin(INCOMING_PORT_READCMDS);
-  udp4writeCmnds.begin(INCOMING_PORT_WRITECMDS);
+  Ethernet.setRetransmissionCount(2);
+  Ethernet.setRetransmissionTimeout(50);
+  if(Ethernet.linkStatus() == LinkON) {
+    ethernetInitialized = true;
+    udp4readCmnds.begin(INCOMING_PORT_READCMDS);
+    udp4writeCmnds.begin(INCOMING_PORT_WRITECMDS);
+  }
+
 }
 
 void nibeCallbackMsgReceived(const byte* const data, int len)
