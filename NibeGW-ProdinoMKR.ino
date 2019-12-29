@@ -21,31 +21,41 @@
  *  29.6.2015   v2.00   Bidirectional support.
  *  18.2.2017   v3.00   Redesigned.
  *
- *                      Code taken from https://github.com/openhab/openhab2-addons/..
- *                      bundles/org.openhab.binding.nibeheatpump/contrib/NibeGW/Arduino/NibeGW
- *                      for https://github.com/fablable/NibeGW-ProdinoMKR by fablable@uamm.de
+ *  This repo https://github.com/fablable/NibeGW-ProdinoMKR by fablable@uamm.de is derived from
+ *  https://github.com/openhab/openhab-addons/tree/master/bundles/org.openhab.binding.nibeheatpump/contrib/NibeGW/Arduino/NibeGW
  *
- *  28.12.2019  v3.50   added support for Prodino MKR Zero Ethernet, modified Ethernet handling
- *                      to prevent Nibe from entering error state if network connection fails
+ *  28.12.2019  v3.50   added support for ProDino MKR Zero Ethernet, for library setup see:
+ *                      https://kmpelectronics.eu/tutorials-examples/prodino-mkr-versions-tutorial/
+ *                      modified Ethernet handling to prevent Nibe from entering error state
+ *                      if network connection fails
+ *  29.12.2019  v3.51   added initialization for UDP message port
+ *                      added options to send debug printouts via serial and/or UDP port
+ *                      debug: send array printout in single UDP packet
  */
 
 // ######### CONFIGURATION #######################
 
-#define VERSION                 "3.50"
+#define VERSION                 "3.51"
 
 // Enable if you use ProDiNo board
 //#define PRODINO_BOARD
-// Enable if you use Prodino MKR Zero
+// Enable if you use ProDino MKR Zero
 #define PRODINO_MKR0
 // Enable if ENC28J60 LAN module is used
 //#define TRANSPORT_ETH_ENC28J60
 
-// Enable debug printouts, listen printouts e.g. via netcat (nc -l -u 50000)
-//#define ENABLE_DEBUG
+// Enable debug printouts sent via serial port and/or via UDP
+// listen printouts e.g. via netcat (nc -l -u 50000)
+//#define ENABLE_DEBUG_SER
+//#define ENABLE_DEBUG_UDP
 #define VERBOSE_LEVEL           3
 
+#if defined ENABLE_DEBUG_SER || defined ENABLE_DEBUG_UDP
+#define ENABLE_DEBUG
+#endif
+
 #ifdef PRODINO_MKR0
-#define BOARD_NAME              "NibeGW running on KMP Prodino MKR Zero"
+#define BOARD_NAME              "NibeGW running on ProDino MKR Zero"
 #else
 #define BOARD_NAME              "Arduino NibeGW"
 #endif
@@ -76,8 +86,6 @@
 #define ACK_SMS40               false
 #define ACK_RMU40               false
 #define SEND_ACK                true
-
-#define DEBUG_BUFFER_SIZE       80
 
 // ######### INCLUDES #######################
 
@@ -133,12 +141,12 @@ NibeGw nibegw(&RS485_PORT, RS485_DIRECTION_PIN);
 
 // ######### DEBUG #######################
 
-#define DEBUG_BUFFER_SIZE       80
+#define DEBUG_BUFFER_SIZE       200
 
 #ifdef ENABLE_DEBUG
 #define DEBUG_PRINT(level, message) if (verbose >= level) { debugPrint(message); }
 #define DEBUG_PRINTDATA(level, message, data) if (verbose >= level) { sprintf(debugBuf, message, data); debugPrint(debugBuf); }
-#define DEBUG_PRINTARRAY(level, data, len) if (verbose >= level) { for (int i = 0; i < len; i++) { sprintf(debugBuf, "%02X", data[i]); debugPrint(debugBuf); }}
+#define DEBUG_PRINTARRAY(level, data, len) if (verbose >= level) { int i; for (i = 0; i < len; i++) { sprintf(debugBuf+i+i, "%02X", data[i]); } sprintf(debugBuf+i+i, "\n"); debugPrint(debugBuf); }
 #else
 #define DEBUG_PRINT(level, message)
 #define DEBUG_PRINTDATA(level, message, data)
@@ -151,9 +159,10 @@ char debugBuf[DEBUG_BUFFER_SIZE];
 
 void debugPrint(char* data)
 {
-#if defined PRODINO_BOARD || defined PRODINO_MKR0
+#ifdef ENABLE_DEBUG_SER
   Serial.print(data);
-#else
+#endif
+#ifdef ENABLE_DEBUG_UDP
   if (ethernetInitialized)
   {
     udp.beginPacket(targetIp, TARGER_DEBUG_PORT);
@@ -190,7 +199,9 @@ void setup()
   DinoInit();
   Serial.begin(115200, SERIAL_8N1);
 #elif defined PRODINO_MKR0
+#ifdef ENABLE_DEBUG_SER
   while(!Serial) ;
+#endif
   KMPProDinoMKRZero.init(ProDino_MKR_Zero_Ethernet);
 #endif
 
@@ -263,6 +274,7 @@ void initializeEthernet()
   Ethernet.setRetransmissionTimeout(50);
   if(Ethernet.linkStatus() == LinkON) {
     ethernetInitialized = true;
+    udp.begin(0);
     udp4readCmnds.begin(INCOMING_PORT_READCMDS);
     udp4writeCmnds.begin(INCOMING_PORT_WRITECMDS);
   }
@@ -322,7 +334,6 @@ void sendUdpPacket(const byte * const data, int len)
 {
   DEBUG_PRINTDATA(2, "Sending UDP packet, len=%d\n", len);
   DEBUG_PRINTARRAY(2, data, len)
-  DEBUG_PRINT(2, "\n");
 
   udp.beginPacket(targetIp, TARGET_PORT);
   udp.write(data, len);
