@@ -3,7 +3,7 @@
 ## UDP Gateway for Nibe heat pumps
 
 This repository is derived from
-[NibeGW project](https://github.com/openhab/openhab-addons/tree/master/bundles/org.openhab.binding.nibeheatpump/contrib/NibeGW/Arduino/NibeGW)
+[NibeGW project](https://github.com/openhab/openhab-addons/tree/2.5.x/bundles/org.openhab.binding.nibeheatpump/contrib/NibeGW/Arduino/NibeGW)
 (OpenHAB).
 
 While the original project was intended to run on 8-bit Arduino, this port has been implemented on a 32-bit ARM Cortex M0+ platform:
